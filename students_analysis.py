@@ -8,7 +8,7 @@ from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import LabelEncoder
 
 # 1. Chargement et nettoyage
-df = pd.read_csv(r'C:\Users\Waad RTIBI\students_analysis\StudentsPerformance.csv')
+df = pd.read_csv('StudentsPerformance.csv')
 print("🔹 Aperçu des données :")
 print(df.head())
 
