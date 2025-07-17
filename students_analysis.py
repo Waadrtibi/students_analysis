@@ -1,81 +1,93 @@
-# students_analysis.py
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+import streamlit as st
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
-from sklearn.preprocessing import LabelEncoder
+from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix, roc_curve, auc
+import numpy as np
 
-# 1. Chargement et nettoyage
-df = pd.read_csv('StudentsPerformance.csv')
-print("🔹 Aperçu des données :")
-print(df.head())
+st.set_page_config(page_title="Analyse & Prédiction Étudiants", layout="wide")
+st.title(" Analyse & Prédiction des Résultats des Étudiants")
 
-print("\n🔍 Valeurs manquantes :")
-print(df.isnull().sum())
+@st.cache_data
+def load_data():
+    df = pd.read_csv("C:/Users/Waad RTIBI/students_analysis/StudentsPerformance.csv")
 
-df.dropna(inplace=True)
+    df["average_score"] = df[["math score", "reading score", "writing score"]].mean(axis=1)
+    df["passed"] = df["average_score"].apply(lambda x: 1 if x >= 60 else 0)
+    return df
 
-df["average_score"] = df[["math score", "reading score", "writing score"]].mean(axis=1)
+df = load_data()
 
-# 2. Visualisation
+df_encoded = pd.get_dummies(df, columns=["gender", "test preparation course"], drop_first=True)
+features = ["math score", "reading score", "writing score", "gender_male", "test preparation course_none"]
+X = df_encoded[features]
+y = df_encoded["passed"]
 
-sns.set(style="whitegrid")
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
 
-# Histogramme
-plt.figure(figsize=(8, 5))
-sns.histplot(df["average_score"], kde=True, bins=20, color="skyblue")
-plt.title("Distribution du score moyen")
-plt.xlabel("Score moyen")
-plt.ylabel("Nombre d'élèves")
-plt.tight_layout()
-plt.show()
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
 
-# Boxplot
-plt.figure(figsize=(8, 5))
-sns.boxplot(x="test preparation course", y="average_score", data=df, palette="Set2")
-plt.title("Score moyen selon la préparation au test")
-plt.xlabel("Préparation au test")
-plt.ylabel("Score moyen")
-plt.tight_layout()
-plt.show()
+models = {
+    "Logistic Regression": LogisticRegression(),
+    "Random Forest": RandomForestClassifier(random_state=42),
+    "K-Nearest Neighbors": KNeighborsClassifier()
+}
 
-# Scatter plot
-plt.figure(figsize=(8, 5))
-sns.scatterplot(data=df, x="math score", y="reading score", hue="gender", palette="Set1")
-plt.title("Math vs Lecture par genre")
-plt.xlabel("Note en math")
-plt.ylabel("Note en lecture")
-plt.tight_layout()
-plt.show()
+st.sidebar.title(" Choix du Modèle")
+model_name = st.sidebar.radio("Sélectionnez un modèle :", list(models.keys()))
 
-# 3. Machine Learning : prédiction
+# Entraîner tous les modèles pour comparaison
+results = {}
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    y_proba = model.predict_proba(X_test)[:, 1]
+    acc = accuracy_score(y_test, y_pred)
+    fpr, tpr, _ = roc_curve(y_test, y_proba)
+    results[name] = {
+        "model": model,
+        "y_pred": y_pred,
+        "accuracy": acc,
+        "fpr": fpr,
+        "tpr": tpr,
+        "conf_matrix": confusion_matrix(y_test, y_pred)
+    }
 
-# Variable cible : réussite
-df["passed"] = (df["average_score"] >= 60).astype(int)
+# Afficher résultats du modèle choisi
+st.header(f" Résultats pour : {model_name}")
+st.write(f"**Accuracy** : {results[model_name]['accuracy']:.2f}")
 
-# Variables explicatives
-features = ["gender", "test preparation course", "math score", "reading score", "writing score"]
-X = df[features].copy()
-y = df["passed"]
+# Matrice de confusion
+fig_cm, ax_cm = plt.subplots()
+sns.heatmap(results[model_name]["conf_matrix"], annot=True, fmt="d", cmap="Blues", ax=ax_cm)
+ax_cm.set_xlabel("Prédit")
+ax_cm.set_ylabel("Réel")
+ax_cm.set_title("Matrice de Confusion")
+st.pyplot(fig_cm)
 
-# Encodage des variables catégorielles
-le_gender = LabelEncoder()
-le_prep = LabelEncoder()
+# ROC Curve
+fig_roc, ax_roc = plt.subplots()
+for name, res in results.items():
+    ax_roc.plot(res["fpr"], res["tpr"], label=f"{name} (AUC = {auc(res['fpr'], res['tpr']):.2f})")
+ax_roc.plot([0, 1], [0, 1], 'k--', label="Random")
+ax_roc.set_xlabel("Faux positif")
+ax_roc.set_ylabel("Vrai positif")
+ax_roc.set_title("Courbe ROC des Modèles")
+ax_roc.legend(loc="lower right")
+st.pyplot(fig_roc)
 
-X["gender"] = le_gender.fit_transform(X["gender"])
-X["test preparation course"] = le_prep.fit_transform(X["test preparation course"])
+# Comparaison tableau
+st.subheader(" Comparaison des Performances")
+compare_df = pd.DataFrame({
+    "Modèle": list(results.keys()),
+    "Accuracy": [results[k]["accuracy"] for k in results]
+}).sort_values("Accuracy", ascending=False)
 
-# Division train/test
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+st.dataframe(compare_df)
 
-# Modèle Random Forest
-model = RandomForestClassifier(n_estimators=100, random_state=42)
-model.fit(X_train, y_train)
-
-# Prédictions
-y_pred = model.predict(X_test)
-accuracy = accuracy_score(y_test, y_pred)
-
-print(f"\n✅ Précision du modèle Random Forest : {accuracy:.2%}")
